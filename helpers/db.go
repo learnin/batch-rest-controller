@@ -22,7 +22,7 @@ func (ds *DataSource) Connect() error {
 	if err := jsonHelper.UnmarshalJsonFile(DATABASE_CONFIG_FILE, &cfg); err != nil {
 		return err
 	}
-	db, err := gorm.Open("sqlite3", cfg.DatabaseFile)
+	db, err := gorm.Open("sqlite3", "file:"+cfg.DatabaseFile+"?cache=shared&mode=rwc")
 	if err != nil {
 		return err
 	}
