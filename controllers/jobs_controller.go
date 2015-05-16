@@ -2,7 +2,9 @@ package controllers
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"time"
 
 	"github.com/learnin/go-multilog"
 	"github.com/zenazn/goji/web"
@@ -22,6 +24,15 @@ type Request struct {
 	Args          string
 }
 
+type Job struct {
+	Id            int64
+	Async         bool
+	RequireResult bool
+	Command       string
+	Args          string
+	CreatedAt     time.Time
+}
+
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
 	// jobId := c.URLParams["jobId"]
 	encoder := json.NewEncoder(w)
@@ -36,12 +47,19 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 		return
 	}
 	if req.Async && req.RequireResult {
-		db := controller.DS.GetDB()
-		if d := db.Exec("insert into jobs(async, require_result, command, args) VALUES(?, ?, ?, ?)", req.Async, req.RequireResult, req.Command, req.Args); d.Error != nil {
-			controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", d.Error)
-			sendEroorResponse(w, d.Error, "")
+		job := Job{
+			Async:         req.Async,
+			RequireResult: req.RequireResult,
+			Command:       req.Command,
+			Args:          req.Args,
+		}
+		if err := controller.DS.GetDB().Save(&job).Error; err != nil {
+			controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", err)
+			sendEroorResponse(w, err, "")
 			return
 		}
+		fmt.Fprintf(w, "{\"id\": %v}", job.Id)
+		return
 	}
 	encoder := json.NewEncoder(w)
 	encoder.Encode(response{Error: false, Messages: []string{}})
