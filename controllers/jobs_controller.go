@@ -1,9 +1,12 @@
 package controllers
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os/exec"
+	"syscall"
 	"time"
 
 	"github.com/learnin/go-multilog"
@@ -58,6 +61,68 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			sendEroorResponse(w, err, "")
 			return
 		}
+		out := make(chan string)
+		errout := make(chan string)
+		jobquit := make(chan bool)
+
+		go func() {
+		loop:
+			for {
+				select {
+				case <-jobquit:
+					break loop
+				case stdout := <-out:
+					// TODO テーブルに格納する
+					fmt.Println(stdout)
+				case stderr := <-errout:
+					// TODO テーブルに格納する
+					fmt.Println(stderr)
+				}
+			}
+		}()
+		go func() {
+			cmd := exec.Command("ps", "-ef")
+			stdout, err := cmd.StdoutPipe()
+			if err != nil {
+				// TODO テーブルに登録する
+				fmt.Println(err)
+				jobquit <- true
+			}
+			stderr, err := cmd.StderrPipe()
+			if err != nil {
+				// TODO テーブルに登録する
+				fmt.Println(err)
+				jobquit <- true
+			}
+
+			if err := cmd.Start(); err != nil {
+				// TODO テーブルに登録する
+				fmt.Println(err)
+				jobquit <- true
+			}
+
+			go func() {
+				scanner := bufio.NewScanner(stdout)
+				for scanner.Scan() {
+					out <- scanner.Text()
+				}
+			}()
+			go func() {
+				scanner := bufio.NewScanner(stderr)
+				for scanner.Scan() {
+					errout <- scanner.Text()
+				}
+			}()
+			if err := cmd.Wait(); err != nil {
+				if err2, ok := err.(*exec.ExitError); ok {
+					if s, ok := err2.Sys().(syscall.WaitStatus); ok {
+						// TODO テーブルに登録する
+						fmt.Println(s.ExitStatus())
+					}
+				}
+			}
+			jobquit <- true
+		}()
 		fmt.Fprintf(w, "{\"id\": %v}", job.Id)
 		return
 	}
