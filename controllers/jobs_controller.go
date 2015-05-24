@@ -116,10 +116,20 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			if err := cmd.Wait(); err != nil {
 				if err2, ok := err.(*exec.ExitError); ok {
 					if s, ok := err2.Sys().(syscall.WaitStatus); ok {
+						fmt.Println(err)
 						// TODO テーブルに登録する
 						fmt.Println(s.ExitStatus())
+					} else {
+						// Unix や Winodws とは異なり、 exec.ExitError.Sys() が syscall.WaitStatus ではないOSの場合
+						fmt.Println(err)
 					}
+				} else {
+					// may be returned for I/O problems.
+					fmt.Println(err)
 				}
+			} else {
+				// TODO exitStatus = 0. テーブルに登録する
+				fmt.Println(0)
 			}
 			jobquit <- true
 		}()
