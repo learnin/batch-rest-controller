@@ -2,6 +2,7 @@ package controllers
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -134,6 +135,31 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			jobquit <- true
 		}()
 		fmt.Fprintf(w, "{\"id\": %v}", job.Id)
+		return
+	} else if !req.Async {
+		cmd := exec.Command("ps", "-ef")
+		var stdout bytes.Buffer
+		var stderr bytes.Buffer
+		cmd.Stdout = &stdout
+		cmd.Stderr = &stderr
+
+		if err := cmd.Run(); err != nil {
+			if err2, ok := err.(*exec.ExitError); ok {
+				if s, ok := err2.Sys().(syscall.WaitStatus); ok {
+					sendEroorResponse(w, err, fmt.Sprintf("バッチが正常終了しませんでした。exitStatus=%v stdout=%v stderr=%v", s.ExitStatus(), stdout.String(), stderr.String()))
+					return
+				} else {
+					// Unix や Winodws とは異なり、 exec.ExitError.Sys() が syscall.WaitStatus ではないOSの場合
+					sendEroorResponse(w, err, fmt.Sprintf("バッチが正常終了しませんでした。stdout=%v stderr=%v", stdout.String(), stderr.String()))
+					return
+				}
+			} else {
+				// may be returned for I/O problems.
+				sendEroorResponse(w, err, "バッチ実行時にエラーが発生しました。")
+				return
+			}
+		}
+		fmt.Fprintf(w, "{\"exitStatus\": 0, \"stdout\": \"%v\", \"stderr\": \"%v\"}", stdout.String(), stderr.String())
 		return
 	}
 	encoder := json.NewEncoder(w)
