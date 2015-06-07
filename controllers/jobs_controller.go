@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
 	"os/exec"
 	"syscall"
@@ -70,77 +71,86 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			sendEroorResponse(w, err, "")
 			return
 		}
-		out := make(chan string)
-		errout := make(chan string)
-		jobquit := make(chan bool)
+		cmd := exec.Command("ps", "-ef")
+		stdout, err := cmd.StdoutPipe()
+		if err != nil {
+			controller.Logger.Errorf("標準出力パイプ取得時にエラーが発生しました。error=%v", err)
+			sendEroorResponse(w, err, "")
+			return
+		}
+		stderr, err := cmd.StderrPipe()
+		if err != nil {
+			controller.Logger.Errorf("標準エラー出力パイプ取得時にエラーが発生しました。error=%v", err)
+			sendEroorResponse(w, err, "")
+			return
+		}
 
-		go func() {
-			nowSeq := int64(0)
-		loop:
-			for {
-				select {
-				case <-jobquit:
-					break loop
-				case stdout := <-out:
-					nowSeq++
-					jobMsg := JobMessage{
-						JobId:   job.Id,
-						Seq:     nowSeq,
-						Type:    1,
-						Message: stdout,
-					}
-					if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
-						controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
-						return
-					}
-				case stderr := <-errout:
-					nowSeq++
-					jobMsg := JobMessage{
-						JobId:   job.Id,
-						Seq:     nowSeq,
-						Type:    2,
-						Message: stderr,
-					}
-					if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
-						controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
-						return
-					}
-				}
-			}
-		}()
-		go func() {
-			cmd := exec.Command("ps", "-ef")
-			stdout, err := cmd.StdoutPipe()
-			if err != nil {
-				// TODO テーブルに登録する
-				fmt.Println(err)
-				jobquit <- true
-			}
-			stderr, err := cmd.StderrPipe()
-			if err != nil {
-				// TODO テーブルに登録する
-				fmt.Println(err)
-				jobquit <- true
-			}
-
+		go func(stdout *io.ReadCloser, stderr *io.ReadCloser) {
 			if err := cmd.Start(); err != nil {
-				// TODO テーブルに登録する
-				fmt.Println(err)
-				jobquit <- true
+				jobMsg := JobMessage{
+					JobId:   job.Id,
+					Seq:     1,
+					Type:    2,
+					Message: err.Error(),
+				}
+				if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
+					controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+					return
+				}
+				return
 			}
+
+			out := make(chan string)
+			errout := make(chan string)
+			jobquit := make(chan bool)
 
 			go func() {
-				scanner := bufio.NewScanner(stdout)
+				nowSeq := int64(0)
+			loop:
+				for {
+					select {
+					case <-jobquit:
+						break loop
+					case stdout := <-out:
+						nowSeq++
+						jobMsg := JobMessage{
+							JobId:   job.Id,
+							Seq:     nowSeq,
+							Type:    1,
+							Message: stdout,
+						}
+						if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
+							controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+							return
+						}
+					case stderr := <-errout:
+						nowSeq++
+						jobMsg := JobMessage{
+							JobId:   job.Id,
+							Seq:     nowSeq,
+							Type:    2,
+							Message: stderr,
+						}
+						if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
+							controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+							return
+						}
+					}
+				}
+			}()
+			go func() {
+				scanner := bufio.NewScanner(*stdout)
 				for scanner.Scan() {
 					out <- scanner.Text()
 				}
 			}()
 			go func() {
-				scanner := bufio.NewScanner(stderr)
+				scanner := bufio.NewScanner(*stderr)
 				for scanner.Scan() {
 					errout <- scanner.Text()
 				}
 			}()
+
 			if err := cmd.Wait(); err != nil {
 				if err2, ok := err.(*exec.ExitError); ok {
 					if s, ok := err2.Sys().(syscall.WaitStatus); ok {
@@ -160,7 +170,8 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				fmt.Println(0)
 			}
 			jobquit <- true
-		}()
+		}(&stdout, &stderr)
+
 		fmt.Fprintf(w, "{\"id\": %v}", job.Id)
 		return
 	} else if !req.Async {
