@@ -37,6 +37,14 @@ type Job struct {
 	CreatedAt     time.Time
 }
 
+type JobMessage struct {
+	JobId     int64
+	Seq       int64
+	Type      int
+	Message   string
+	CreatedAt time.Time
+}
+
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
 	// jobId := c.URLParams["jobId"]
 	encoder := json.NewEncoder(w)
@@ -67,17 +75,36 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 		jobquit := make(chan bool)
 
 		go func() {
+			nowSeq := int64(0)
 		loop:
 			for {
 				select {
 				case <-jobquit:
 					break loop
 				case stdout := <-out:
-					// TODO テーブルに格納する
-					fmt.Println(stdout)
+					nowSeq++
+					jobMsg := JobMessage{
+						JobId:   job.Id,
+						Seq:     nowSeq,
+						Type:    1,
+						Message: stdout,
+					}
+					if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
+						controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+						return
+					}
 				case stderr := <-errout:
-					// TODO テーブルに格納する
-					fmt.Println(stderr)
+					nowSeq++
+					jobMsg := JobMessage{
+						JobId:   job.Id,
+						Seq:     nowSeq,
+						Type:    2,
+						Message: stderr,
+					}
+					if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
+						controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+						return
+					}
 				}
 			}
 		}()
