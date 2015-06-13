@@ -47,9 +47,32 @@ type JobMessage struct {
 }
 
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
-	// jobId := c.URLParams["jobId"]
+	jobId := c.URLParams["jobId"]
+	job := Job{}
+	// FIXME SQLiteのマルチスレッドサポートは接続単位なので、都度Open,Closeする
+	if d := controller.DS.GetDB().First(&job, jobId); d.Error != nil {
+		if d.RecordNotFound() {
+			http.Error(w, "", http.StatusNotFound)
+			return
+		}
+		controller.Logger.Errorf("jobs テーブル取得時にエラーが発生しました。error=%v", d.Error)
+		sendEroorResponse(w, d.Error, "")
+		return
+	}
+	msgs := []JobMessage{}
+	resMsgs := []string{}
+	if d := controller.DS.GetDB().Order("seq").Find(&msgs, "job_id = ?", jobId).Pluck("message", &resMsgs); d.Error != nil {
+		if d.RecordNotFound() {
+			encoder := json.NewEncoder(w)
+			encoder.Encode(response{Error: false, Messages: []string{}})
+			return
+		}
+		controller.Logger.Errorf("jobMessages テーブル取得時にエラーが発生しました。error=%v", d.Error)
+		sendEroorResponse(w, d.Error, "")
+		return
+	}
 	encoder := json.NewEncoder(w)
-	encoder.Encode(response{Error: false, Messages: []string{}})
+	encoder.Encode(response{Error: false, Messages: resMsgs})
 }
 
 func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Request) {
