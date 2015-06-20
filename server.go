@@ -41,7 +41,6 @@ func main() {
 	log = multilog.New(stdOutLogrus, fileLogrus)
 
 	var ds helpers.DataSource
-	// FIXME SQLiteのマルチスレッドサポートは接続単位なので、都度Open,Closeする
 	if err := ds.Connect(); err != nil {
 		panic(err)
 	}

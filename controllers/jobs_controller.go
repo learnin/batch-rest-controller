@@ -49,7 +49,6 @@ type JobMessage struct {
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
 	jobId := c.URLParams["jobId"]
 	job := Job{}
-	// FIXME SQLiteのマルチスレッドサポートは接続単位なので、都度Open,Closeする
 	if d := controller.DS.GetDB().First(&job, jobId); d.Error != nil {
 		if d.RecordNotFound() {
 			http.Error(w, "", http.StatusNotFound)
