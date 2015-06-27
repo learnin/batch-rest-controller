@@ -30,12 +30,13 @@ type Request struct {
 }
 
 type Job struct {
-	Id            int64
-	Async         bool
-	RequireResult bool
-	Command       string
-	Args          string
-	CreatedAt     time.Time
+	Id         int64
+	Command    string
+	Args       string
+	Status     int
+	ExitStatus int
+	CreatedAt  time.Time
+	FinishedAt time.Time
 }
 
 type JobMessage struct {
@@ -45,6 +46,13 @@ type JobMessage struct {
 	Message   string
 	CreatedAt time.Time
 }
+
+const (
+	STATUS_WAITING_TO_RUN = 0
+	STATUS_RUNNING        = 1
+	STATUS_FINISHED       = 2
+	STATUS_CANNOT_RUN     = -1
+)
 
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
 	jobId := c.URLParams["jobId"]
@@ -83,17 +91,21 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 	}
 	if req.Async && req.RequireResult {
 		job := Job{
-			Async:         req.Async,
-			RequireResult: req.RequireResult,
-			Command:       req.Command,
-			Args:          req.Args,
+			Command: req.Command,
+			Args:    req.Args,
+			Status:  STATUS_WAITING_TO_RUN,
 		}
-		if err := controller.DS.GetDB().Save(&job).Error; err != nil {
-			controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", err)
-			sendEroorResponse(w, err, "")
-			return
+		if req.RequireResult {
+			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+				tx := ds.GetTx()
+				return tx.Save(&job).Error
+			}); err != nil {
+				controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", err)
+				sendEroorResponse(w, err, "")
+				return
+			}
 		}
-		cmd := exec.Command("ps", "-ef")
+		cmd := exec.Command("ps", "-ef@")
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			controller.Logger.Errorf("標準出力パイプ取得時にエラーが発生しました。error=%v", err)
@@ -108,17 +120,28 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 		}
 
 		go func(stdout *io.ReadCloser, stderr *io.ReadCloser) {
-			if err := cmd.Start(); err != nil {
+			if err := cmd.Start(); err != nil && req.RequireResult {
 				jobMsg := JobMessage{
 					JobId:   job.Id,
 					Seq:     1,
 					Type:    2,
 					Message: err.Error(),
 				}
-				if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
+				if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+					tx := ds.GetTx()
+					return tx.Save(&jobMsg).Error
+				}); err != nil {
 					controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
 					return
 				}
+				return
+			}
+			job.Status = STATUS_RUNNING
+			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+				tx := ds.GetTx()
+				return tx.Save(&job).Error
+			}); err != nil {
+				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
 				return
 			}
 
@@ -134,28 +157,38 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 					case <-jobquit:
 						break loop
 					case stdout := <-out:
-						nowSeq++
-						jobMsg := JobMessage{
-							JobId:   job.Id,
-							Seq:     nowSeq,
-							Type:    1,
-							Message: stdout,
-						}
-						if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
-							controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
-							return
+						if req.RequireResult {
+							nowSeq++
+							jobMsg := JobMessage{
+								JobId:   job.Id,
+								Seq:     nowSeq,
+								Type:    1,
+								Message: stdout,
+							}
+							if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+								tx := ds.GetTx()
+								return tx.Save(&jobMsg).Error
+							}); err != nil {
+								controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+								return
+							}
 						}
 					case stderr := <-errout:
-						nowSeq++
-						jobMsg := JobMessage{
-							JobId:   job.Id,
-							Seq:     nowSeq,
-							Type:    2,
-							Message: stderr,
-						}
-						if err := controller.DS.GetDB().Save(&jobMsg).Error; err != nil {
-							controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
-							return
+						if req.RequireResult {
+							nowSeq++
+							jobMsg := JobMessage{
+								JobId:   job.Id,
+								Seq:     nowSeq,
+								Type:    2,
+								Message: stderr,
+							}
+							if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+								tx := ds.GetTx()
+								return tx.Save(&jobMsg).Error
+							}); err != nil {
+								controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+								return
+							}
 						}
 					}
 				}
@@ -174,28 +207,51 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			}()
 
 			if err := cmd.Wait(); err != nil {
+				jobquit <- true
 				if err2, ok := err.(*exec.ExitError); ok {
+					job.FinishedAt = time.Now()
+					job.Status = STATUS_FINISHED
 					if s, ok := err2.Sys().(syscall.WaitStatus); ok {
-						fmt.Println(err)
-						// TODO テーブルに登録する
-						fmt.Println(s.ExitStatus())
-					} else {
-						// Unix や Winodws とは異なり、 exec.ExitError.Sys() が syscall.WaitStatus ではないOSの場合
-						fmt.Println(err)
+						job.ExitStatus = s.ExitStatus()
 					}
 				} else {
 					// may be returned for I/O problems.
-					fmt.Println(err)
+					job.Status = STATUS_CANNOT_RUN
+				}
+				var msgCount int64
+				if cerr := controller.DS.GetDB().Model(JobMessage{}).Where("job_id = ?", job.Id).Count(&msgCount).Error; cerr != nil {
+					controller.Logger.Errorf("job_messages テーブル取得時にエラーが発生しました。error=%v", cerr)
+					return
+				}
+				jobMsg := JobMessage{
+					JobId:   job.Id,
+					Seq:     msgCount + 1,
+					Type:    2,
+					Message: err.Error(),
+				}
+				if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+					tx := ds.GetTx()
+					return tx.Save(&jobMsg).Error
+				}); err != nil {
+					controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
 				}
 			} else {
-				// TODO exitStatus = 0. テーブルに登録する
-				fmt.Println(0)
+				job.FinishedAt = time.Now()
+				job.Status = STATUS_FINISHED
+				job.ExitStatus = 0
 			}
-			jobquit <- true
+			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+				tx := ds.GetTx()
+				return tx.Save(&job).Error
+			}); err != nil {
+				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
+			}
 		}(&stdout, &stderr)
 
-		fmt.Fprintf(w, "{\"id\": %v}", job.Id)
-		return
+		if req.RequireResult {
+			fmt.Fprintf(w, "{\"id\": %v}", job.Id)
+			return
+		}
 	} else if !req.Async {
 		cmd := exec.Command("ps", "-ef")
 		var stdout bytes.Buffer
