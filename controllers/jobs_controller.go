@@ -105,7 +105,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				return
 			}
 		}
-		cmd := exec.Command("ps", "-ef@")
+		cmd := exec.Command("ps", "-ef")
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			controller.Logger.Errorf("標準出力パイプ取得時にエラーが発生しました。error=%v", err)
@@ -127,13 +127,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 					Type:    2,
 					Message: err.Error(),
 				}
-				if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-					tx := ds.GetTx()
-					return tx.Save(&jobMsg).Error
-				}); err != nil {
-					controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
-					return
-				}
+				controller.insertJobMessage(&jobMsg)
 				return
 			}
 			job.Status = STATUS_RUNNING
@@ -165,11 +159,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 								Type:    1,
 								Message: stdout,
 							}
-							if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-								tx := ds.GetTx()
-								return tx.Save(&jobMsg).Error
-							}); err != nil {
-								controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+							if err := controller.insertJobMessage(&jobMsg); err != nil {
 								return
 							}
 						}
@@ -182,11 +172,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 								Type:    2,
 								Message: stderr,
 							}
-							if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-								tx := ds.GetTx()
-								return tx.Save(&jobMsg).Error
-							}); err != nil {
-								controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+							if err := controller.insertJobMessage(&jobMsg); err != nil {
 								return
 							}
 						}
@@ -229,12 +215,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 					Type:    2,
 					Message: err.Error(),
 				}
-				if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-					tx := ds.GetTx()
-					return tx.Save(&jobMsg).Error
-				}); err != nil {
-					controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
-				}
+				controller.insertJobMessage(&jobMsg)
 			} else {
 				job.FinishedAt = time.Now()
 				job.Status = STATUS_FINISHED
@@ -280,4 +261,15 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 	}
 	encoder := json.NewEncoder(w)
 	encoder.Encode(response{Error: false, Messages: []string{}})
+}
+
+func (controller *JobsController) insertJobMessage(jobMsg *JobMessage) error {
+	if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
+		tx := ds.GetTx()
+		return tx.Save(jobMsg).Error
+	}); err != nil {
+		controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
+		return err
+	}
+	return nil
 }
