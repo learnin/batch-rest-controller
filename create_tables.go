@@ -18,4 +18,7 @@ func main() {
 	if d := db.Exec("create table job_messages(job_id integer NOT NULL, seq integer NOT NULL, type integer NOT NULL, message text, created_at TIMESTAMP NOT NULL DEFAULT (DATETIME('now','localtime')), PRIMARY KEY(job_id, seq))"); d.Error != nil {
 		panic(d.Error)
 	}
+	if d := db.Exec("create table api_keies(id integer NOT NULL PRIMARY KEY AUTOINCREMENT, client_name text NOT NULL, api_key text NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT (DATETIME('now','localtime')))"); d.Error != nil {
+		panic(d.Error)
+	}
 }

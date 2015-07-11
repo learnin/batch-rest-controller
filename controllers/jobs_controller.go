@@ -27,6 +27,7 @@ type Request struct {
 	RequireResult bool
 	Command       string
 	Args          string
+	Key           string
 }
 
 type Job struct {
@@ -47,6 +48,13 @@ type JobMessage struct {
 	CreatedAt time.Time
 }
 
+type ApiKey struct {
+	Id         int64
+	ClientName string
+	ApiKey     string
+	CreatedAt  time.Time
+}
+
 const (
 	STATUS_WAITING_TO_RUN = 0
 	STATUS_RUNNING        = 1
@@ -55,6 +63,21 @@ const (
 )
 
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
+	key := r.FormValue("key")
+	if key == "" {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+	apiKey := ApiKey{}
+	if d := controller.DS.GetDB().Where("api_key = ?", key).First(&apiKey); d.Error != nil {
+		if d.RecordNotFound() {
+			http.Error(w, "", http.StatusForbidden)
+			return
+		}
+		controller.Logger.Errorf("api_keys テーブル取得時にエラーが発生しました。error=%v", d.Error)
+		sendEroorResponse(w, d.Error, "")
+		return
+	}
 	jobId := c.URLParams["jobId"]
 	job := Job{}
 	if d := controller.DS.GetDB().First(&job, jobId); d.Error != nil {
@@ -87,6 +110,20 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		controller.Logger.Error(err)
 		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+	if req.Key == "" {
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+	apiKey := ApiKey{}
+	if d := controller.DS.GetDB().Where("api_key = ?", req.Key).First(&apiKey); d.Error != nil {
+		if d.RecordNotFound() {
+			http.Error(w, "", http.StatusForbidden)
+			return
+		}
+		controller.Logger.Errorf("api_keys テーブル取得時にエラーが発生しました。error=%v", d.Error)
+		sendEroorResponse(w, d.Error, "")
 		return
 	}
 	if req.Async && req.RequireResult {
