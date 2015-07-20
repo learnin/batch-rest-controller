@@ -60,6 +60,8 @@ const (
 	STATUS_RUNNING        = 1
 	STATUS_FINISHED       = 2
 	STATUS_CANNOT_RUN     = -1
+	JOB_MSG_TYPE_NORMAL   = 1
+	JOB_MSG_TYPE_ERROR    = 2
 )
 
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
@@ -161,7 +163,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				jobMsg := JobMessage{
 					JobId:   job.Id,
 					Seq:     1,
-					Type:    2,
+					Type:    JOB_MSG_TYPE_ERROR,
 					Message: err.Error(),
 				}
 				controller.insertJobMessage(&jobMsg)
@@ -193,7 +195,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 							jobMsg := JobMessage{
 								JobId:   job.Id,
 								Seq:     nowSeq,
-								Type:    1,
+								Type:    JOB_MSG_TYPE_NORMAL,
 								Message: stdout,
 							}
 							if err := controller.insertJobMessage(&jobMsg); err != nil {
@@ -206,7 +208,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 							jobMsg := JobMessage{
 								JobId:   job.Id,
 								Seq:     nowSeq,
-								Type:    2,
+								Type:    JOB_MSG_TYPE_ERROR,
 								Message: stderr,
 							}
 							if err := controller.insertJobMessage(&jobMsg); err != nil {
@@ -249,7 +251,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				jobMsg := JobMessage{
 					JobId:   job.Id,
 					Seq:     msgCount + 1,
-					Type:    2,
+					Type:    JOB_MSG_TYPE_ERROR,
 					Message: err.Error(),
 				}
 				controller.insertJobMessage(&jobMsg)
