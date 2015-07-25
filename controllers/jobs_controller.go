@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"sync"
 	"syscall"
 	"time"
 
@@ -20,6 +21,7 @@ import (
 type JobsController struct {
 	DS     *helpers.DataSource
 	Logger *multilog.MultiLogger
+	Mutex  *sync.Mutex
 }
 
 type Request struct {
@@ -80,6 +82,8 @@ func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.R
 		return
 	}
 	apiKey := ApiKey{}
+	controller.Mutex.Lock()
+	defer controller.Mutex.Unlock()
 	if d := controller.DS.GetDB().Where("api_key = ?", key).First(&apiKey); d.Error != nil {
 		if d.RecordNotFound() {
 			http.Error(w, "", http.StatusForbidden)
@@ -144,14 +148,17 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			Status:  WaitingToRun,
 		}
 		if req.RequireResult {
+			controller.Mutex.Lock()
 			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
 				tx := ds.GetTx()
 				return tx.Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", err)
 				sendEroorResponse(w, err, "")
+				controller.Mutex.Unlock()
 				return
 			}
+			controller.Mutex.Unlock()
 		}
 		cmd := exec.Command("ps", "-ef")
 		stdout, err := cmd.StdoutPipe()
@@ -179,13 +186,16 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				return
 			}
 			job.Status = Running
+			controller.Mutex.Lock()
 			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
 				tx := ds.GetTx()
 				return tx.Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
+				controller.Mutex.Unlock()
 				return
 			}
+			controller.Mutex.Unlock()
 
 			out := make(chan string)
 			errout := make(chan string)
@@ -269,12 +279,15 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				job.Status = Finished
 				job.ExitStatus = 0
 			}
+			controller.Mutex.Lock()
 			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
 				tx := ds.GetTx()
 				return tx.Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
+				controller.Mutex.Unlock()
 			}
+			controller.Mutex.Unlock()
 		}(&stdout, &stderr)
 
 		if req.RequireResult {
@@ -312,6 +325,8 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 }
 
 func (controller *JobsController) insertJobMessage(jobMsg *JobMessage) error {
+	controller.Mutex.Lock()
+	defer controller.Mutex.Unlock()
 	if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
 		tx := ds.GetTx()
 		return tx.Save(jobMsg).Error
