@@ -30,11 +30,21 @@ type Request struct {
 	Key           string
 }
 
+//go:generate stringer -type=Status
+type Status int
+
+const (
+	WaitingToRun Status = iota + 1
+	Running
+	Finished
+	CannotRun
+)
+
 type Job struct {
 	Id         int64
 	Command    string
 	Args       string
-	Status     int
+	Status     Status
 	ExitStatus int
 	CreatedAt  time.Time
 	FinishedAt time.Time
@@ -43,7 +53,7 @@ type Job struct {
 type JobMessage struct {
 	JobId     int64
 	Seq       int64
-	Type      int
+	Type      JobMessageType
 	Message   string
 	CreatedAt time.Time
 }
@@ -55,13 +65,12 @@ type ApiKey struct {
 	CreatedAt  time.Time
 }
 
+//go:generate stringer -type=JobMessageType
+type JobMessageType int
+
 const (
-	STATUS_WAITING_TO_RUN = 0
-	STATUS_RUNNING        = 1
-	STATUS_FINISHED       = 2
-	STATUS_CANNOT_RUN     = -1
-	JOB_MSG_TYPE_NORMAL   = 1
-	JOB_MSG_TYPE_ERROR    = 2
+	Normal JobMessageType = iota + 1
+	Error
 )
 
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
@@ -132,7 +141,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 		job := Job{
 			Command: req.Command,
 			Args:    req.Args,
-			Status:  STATUS_WAITING_TO_RUN,
+			Status:  WaitingToRun,
 		}
 		if req.RequireResult {
 			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
@@ -163,13 +172,13 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				jobMsg := JobMessage{
 					JobId:   job.Id,
 					Seq:     1,
-					Type:    JOB_MSG_TYPE_ERROR,
+					Type:    Error,
 					Message: err.Error(),
 				}
 				controller.insertJobMessage(&jobMsg)
 				return
 			}
-			job.Status = STATUS_RUNNING
+			job.Status = Running
 			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
 				tx := ds.GetTx()
 				return tx.Save(&job).Error
@@ -195,7 +204,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 							jobMsg := JobMessage{
 								JobId:   job.Id,
 								Seq:     nowSeq,
-								Type:    JOB_MSG_TYPE_NORMAL,
+								Type:    Normal,
 								Message: stdout,
 							}
 							if err := controller.insertJobMessage(&jobMsg); err != nil {
@@ -208,7 +217,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 							jobMsg := JobMessage{
 								JobId:   job.Id,
 								Seq:     nowSeq,
-								Type:    JOB_MSG_TYPE_ERROR,
+								Type:    Error,
 								Message: stderr,
 							}
 							if err := controller.insertJobMessage(&jobMsg); err != nil {
@@ -235,13 +244,13 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				jobquit <- true
 				if err2, ok := err.(*exec.ExitError); ok {
 					job.FinishedAt = time.Now()
-					job.Status = STATUS_FINISHED
+					job.Status = Finished
 					if s, ok := err2.Sys().(syscall.WaitStatus); ok {
 						job.ExitStatus = s.ExitStatus()
 					}
 				} else {
 					// may be returned for I/O problems.
-					job.Status = STATUS_CANNOT_RUN
+					job.Status = CannotRun
 				}
 				var msgCount int64
 				if cerr := controller.DS.GetDB().Model(JobMessage{}).Where("job_id = ?", job.Id).Count(&msgCount).Error; cerr != nil {
@@ -251,13 +260,13 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				jobMsg := JobMessage{
 					JobId:   job.Id,
 					Seq:     msgCount + 1,
-					Type:    JOB_MSG_TYPE_ERROR,
+					Type:    Error,
 					Message: err.Error(),
 				}
 				controller.insertJobMessage(&jobMsg)
 			} else {
 				job.FinishedAt = time.Now()
-				job.Status = STATUS_FINISHED
+				job.Status = Finished
 				job.ExitStatus = 0
 			}
 			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
