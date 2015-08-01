@@ -43,28 +43,28 @@ const (
 )
 
 type Job struct {
-	Id         int64
-	Command    string
-	Args       string
-	Status     Status
-	ExitStatus int
-	CreatedAt  time.Time
+	Id         int64     `sql:"AUTO_INCREMENT"`
+	Command    string    `sql:"size:1000;not null"`
+	Args       string    `sql:"size:1000"`
+	Status     Status    `sql:"size:1;not null"`
+	ExitStatus int       `sql:"size:4`
+	CreatedAt  time.Time `sql:"DEFAULT:(DATETIME('now','localtime'));not null"`
 	FinishedAt time.Time
 }
 
 type JobMessage struct {
-	JobId     int64
-	Seq       int64
-	Type      JobMessageType
-	Message   string
-	CreatedAt time.Time
+	JobId     int64          `gorm:"primary_key"`
+	Seq       int64          `gorm:"primary_key"`
+	Type      JobMessageType `sql:"size:1;not null"`
+	Message   string         `sql:"size:4000"`
+	CreatedAt time.Time      `sql:"DEFAULT:(DATETIME('now','localtime'));not null"`
 }
 
 type ApiKey struct {
-	Id         int64
-	ClientName string
-	ApiKey     string
-	CreatedAt  time.Time
+	Id         int64     `sql:"AUTO_INCREMENT"`
+	ClientName string    `sql:"size:100;not null"`
+	ApiKey     string    `sql:"size:256;not null"`
+	CreatedAt  time.Time `sql:"DEFAULT:(DATETIME('now','localtime'));not null"`
 }
 
 //go:generate stringer -type=JobMessageType
@@ -329,7 +329,7 @@ func (controller *JobsController) insertJobMessage(jobMsg *JobMessage) error {
 	defer controller.Mutex.Unlock()
 	if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
 		tx := ds.GetTx()
-		return tx.Save(jobMsg).Error
+		return tx.Create(jobMsg).Error
 	}); err != nil {
 		controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
 		return err
