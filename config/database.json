@@ -1,3 +1,7 @@
 {
-  "databaseFile": "./db/data.db"
+  "host": "localhost",
+  "port": 3306,
+  "database": "batch_rest_controller",
+  "username": "brc",
+  "password": "brc"
 }

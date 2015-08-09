@@ -1,14 +1,19 @@
 package helpers
 
 import (
+	"fmt"
+	_ "github.com/go-sql-driver/mysql"
 	"github.com/jinzhu/gorm"
-	_ "github.com/mattn/go-sqlite3"
 )
 
 const DATABASE_CONFIG_FILE = "config/database.json"
 
 type config struct {
-	DatabaseFile string
+	Host     string
+	Port     int
+	Database string
+	Username string
+	Password string
 }
 
 type DataSource struct {
@@ -22,7 +27,8 @@ func (ds *DataSource) Connect() error {
 	if err := jsonHelper.UnmarshalJsonFile(DATABASE_CONFIG_FILE, &cfg); err != nil {
 		return err
 	}
-	db, err := gorm.Open("sqlite3", "file:"+cfg.DatabaseFile+"?cache=shared&mode=rwc")
+	connStr := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Asia%%2FTokyo", cfg.Username, cfg.Password, cfg.Host, cfg.Port, cfg.Database)
+	db, err := gorm.Open("mysql", connStr)
 	if err != nil {
 		return err
 	}

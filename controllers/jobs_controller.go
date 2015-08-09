@@ -48,23 +48,23 @@ type Job struct {
 	Args       string    `sql:"size:1000"`
 	Status     Status    `sql:"size:1;not null"`
 	ExitStatus int       `sql:"size:4`
-	CreatedAt  time.Time `sql:"DEFAULT:(DATETIME('now','localtime'));not null"`
+	CreatedAt  time.Time `sql:"DEFAULT:current_timestamp;not null"`
 	FinishedAt time.Time
 }
 
 type JobMessage struct {
-	JobId     int64          `gorm:"primary_key"`
-	Seq       int64          `gorm:"primary_key"`
+	JobId     int64          `gorm:"primary_key" sql:"type:bigint"`
+	Seq       int64          `gorm:"primary_key" sql:"type:bigint"`
 	Type      JobMessageType `sql:"size:1;not null"`
 	Message   string         `sql:"size:4000"`
-	CreatedAt time.Time      `sql:"DEFAULT:(DATETIME('now','localtime'));not null"`
+	CreatedAt time.Time      `sql:"DEFAULT:current_timestamp;not null"`
 }
 
 type ApiKey struct {
 	Id         int64     `sql:"AUTO_INCREMENT"`
 	ClientName string    `sql:"size:100;not null"`
 	ApiKey     string    `sql:"size:256;not null"`
-	CreatedAt  time.Time `sql:"DEFAULT:(DATETIME('now','localtime'));not null"`
+	CreatedAt  time.Time `sql:"DEFAULT:current_timestamp;not null"`
 }
 
 //go:generate stringer -type=JobMessageType
