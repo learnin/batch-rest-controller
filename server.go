@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"sync"
 
 	"github.com/Sirupsen/logrus"
 	"github.com/learnin/go-multilog"
@@ -49,7 +48,7 @@ func main() {
 	jobs := web.New()
 	goji.Handle("/jobs/*", jobs)
 	jobs.Use(middleware.SubRouter)
-	jobsController := controllers.JobsController{DS: &ds, Logger: log, Mutex: &sync.Mutex{}}
+	jobsController := controllers.JobsController{DS: &ds, Logger: log}
 	jobs.Post("/run", jobsController.Run)
 	jobs.Get("/:jobId", jobsController.Show)
 

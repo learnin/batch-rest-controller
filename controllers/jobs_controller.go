@@ -8,10 +8,10 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
-	"sync"
 	"syscall"
 	"time"
 
+	"github.com/jinzhu/gorm"
 	"github.com/learnin/go-multilog"
 	"github.com/zenazn/goji/web"
 
@@ -21,7 +21,6 @@ import (
 type JobsController struct {
 	DS     *helpers.DataSource
 	Logger *multilog.MultiLogger
-	Mutex  *sync.Mutex
 }
 
 type Request struct {
@@ -82,8 +81,6 @@ func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.R
 		return
 	}
 	apiKey := ApiKey{}
-	controller.Mutex.Lock()
-	defer controller.Mutex.Unlock()
 	if d := controller.DS.GetDB().Where("api_key = ?", key).First(&apiKey); d.Error != nil {
 		if d.RecordNotFound() {
 			http.Error(w, "", http.StatusForbidden)
@@ -148,17 +145,13 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			Status:  WaitingToRun,
 		}
 		if req.RequireResult {
-			controller.Mutex.Lock()
-			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-				tx := ds.GetTx()
+			if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
 				return tx.Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", err)
 				sendEroorResponse(w, err, "")
-				controller.Mutex.Unlock()
 				return
 			}
-			controller.Mutex.Unlock()
 		}
 		cmd := exec.Command("ps", "-ef")
 		stdout, err := cmd.StdoutPipe()
@@ -173,8 +166,23 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			sendEroorResponse(w, err, "")
 			return
 		}
-
 		go func(stdout *io.ReadCloser, stderr *io.ReadCloser) {
+			out := make(chan string)
+			errout := make(chan string)
+			jobquit := make(chan bool)
+
+			go func() {
+				scanner := bufio.NewScanner(*stdout)
+				for scanner.Scan() {
+					out <- scanner.Text()
+				}
+			}()
+			go func() {
+				scanner := bufio.NewScanner(*stderr)
+				for scanner.Scan() {
+					errout <- scanner.Text()
+				}
+			}()
 			if err := cmd.Start(); err != nil && req.RequireResult {
 				jobMsg := JobMessage{
 					JobId:   job.Id,
@@ -186,21 +194,12 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				return
 			}
 			job.Status = Running
-			controller.Mutex.Lock()
-			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-				tx := ds.GetTx()
+			if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
 				return tx.Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
-				controller.Mutex.Unlock()
 				return
 			}
-			controller.Mutex.Unlock()
-
-			out := make(chan string)
-			errout := make(chan string)
-			jobquit := make(chan bool)
-
 			go func() {
 				nowSeq := int64(0)
 			loop:
@@ -237,19 +236,6 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 					}
 				}
 			}()
-			go func() {
-				scanner := bufio.NewScanner(*stdout)
-				for scanner.Scan() {
-					out <- scanner.Text()
-				}
-			}()
-			go func() {
-				scanner := bufio.NewScanner(*stderr)
-				for scanner.Scan() {
-					errout <- scanner.Text()
-				}
-			}()
-
 			if err := cmd.Wait(); err != nil {
 				jobquit <- true
 				if err2, ok := err.(*exec.ExitError); ok {
@@ -279,15 +265,11 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				job.Status = Finished
 				job.ExitStatus = 0
 			}
-			controller.Mutex.Lock()
-			if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-				tx := ds.GetTx()
+			if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
 				return tx.Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
-				controller.Mutex.Unlock()
 			}
-			controller.Mutex.Unlock()
 		}(&stdout, &stderr)
 
 		if req.RequireResult {
@@ -325,10 +307,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 }
 
 func (controller *JobsController) insertJobMessage(jobMsg *JobMessage) error {
-	controller.Mutex.Lock()
-	defer controller.Mutex.Unlock()
-	if err := controller.DS.DoInTransaction(func(ds *helpers.DataSource) error {
-		tx := ds.GetTx()
+	if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
 		return tx.Create(jobMsg).Error
 	}); err != nil {
 		controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)

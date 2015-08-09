@@ -18,7 +18,6 @@ type config struct {
 
 type DataSource struct {
 	db *gorm.DB
-	tx *gorm.DB
 }
 
 func (ds *DataSource) Connect() error {
@@ -51,17 +50,13 @@ func (ds *DataSource) GetDB() *gorm.DB {
 	return ds.db
 }
 
-func (ds *DataSource) GetTx() *gorm.DB {
-	return ds.tx
-}
-
-func (ds *DataSource) DoInTransaction(callback func(ds *DataSource) error) error {
-	ds.tx = ds.db.Begin()
-	if err := callback(ds); err != nil {
-		ds.tx.Rollback()
+func (ds *DataSource) DoInTransaction(callback func(tx *gorm.DB) error) error {
+	tx := ds.db.Begin()
+	if err := callback(tx); err != nil {
+		tx.Rollback()
 		return err
 	}
-	if err := ds.tx.Commit().Error; err != nil {
+	if err := tx.Commit().Error; err != nil {
 		return err
 	}
 	return nil
