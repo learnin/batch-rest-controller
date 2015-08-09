@@ -11,7 +11,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/jinzhu/gorm"
 	"github.com/learnin/go-multilog"
 	"github.com/zenazn/goji/web"
 
@@ -145,8 +144,8 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			Status:  WaitingToRun,
 		}
 		if req.RequireResult {
-			if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
-				return tx.Save(&job).Error
+			if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
+				return th.GetTx().Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", err)
 				sendEroorResponse(w, err, "")
@@ -194,8 +193,8 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				return
 			}
 			job.Status = Running
-			if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
-				return tx.Save(&job).Error
+			if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
+				return th.GetTx().Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
 				return
@@ -265,8 +264,8 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				job.Status = Finished
 				job.ExitStatus = 0
 			}
-			if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
-				return tx.Save(&job).Error
+			if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
+				return th.GetTx().Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル更新時にエラーが発生しました。error=%v", err)
 			}
@@ -307,8 +306,8 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 }
 
 func (controller *JobsController) insertJobMessage(jobMsg *JobMessage) error {
-	if err := controller.DS.DoInTransaction(func(tx *gorm.DB) error {
-		return tx.Create(jobMsg).Error
+	if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
+		return th.GetTx().Create(jobMsg).Error
 	}); err != nil {
 		controller.Logger.Errorf("job_messages テーブル登録時にエラーが発生しました。error=%v", err)
 		return err

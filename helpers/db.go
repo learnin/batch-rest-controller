@@ -20,6 +20,14 @@ type DataSource struct {
 	db *gorm.DB
 }
 
+type TxHolder struct {
+	tx *gorm.DB
+}
+
+func (th *TxHolder) GetTx() *gorm.DB {
+	return th.tx
+}
+
 func (ds *DataSource) Connect() error {
 	jsonHelper := Json{}
 	var cfg config
@@ -50,9 +58,12 @@ func (ds *DataSource) GetDB() *gorm.DB {
 	return ds.db
 }
 
-func (ds *DataSource) DoInTransaction(callback func(tx *gorm.DB) error) error {
+func (ds *DataSource) DoInTransaction(callback func(th *TxHolder) error) error {
 	tx := ds.db.Begin()
-	if err := callback(tx); err != nil {
+	th := TxHolder{
+		tx: tx,
+	}
+	if err := callback(&th); err != nil {
 		tx.Rollback()
 		return err
 	}
