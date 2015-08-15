@@ -27,7 +27,6 @@ type Request struct {
 	RequireResult bool
 	Command       string
 	Args          string
-	Key           string
 }
 
 //go:generate stringer -type=Status
@@ -74,7 +73,7 @@ const (
 )
 
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
-	key := r.FormValue("key")
+	key := r.Header.Get("X-Authorization-Key")
 	if key == "" {
 		http.Error(w, "", http.StatusBadRequest)
 		return
@@ -117,18 +116,13 @@ func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.R
 }
 
 func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Request) {
-	req := Request{}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		controller.Logger.Error(err)
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-	if req.Key == "" {
+	key := r.Header.Get("X-Authorization-Key")
+	if key == "" {
 		http.Error(w, "", http.StatusBadRequest)
 		return
 	}
 	apiKey := ApiKey{}
-	if d := controller.DS.GetDB().Where("api_key = ?", req.Key).First(&apiKey); d.Error != nil {
+	if d := controller.DS.GetDB().Where("api_key = ?", key).First(&apiKey); d.Error != nil {
 		if d.RecordNotFound() {
 			http.Error(w, "", http.StatusForbidden)
 			return
@@ -137,6 +131,14 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 		sendEroorResponse(w, d.Error, "")
 		return
 	}
+
+	req := Request{}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		controller.Logger.Error(err)
+		http.Error(w, "", http.StatusBadRequest)
+		return
+	}
+
 	if req.Async && req.RequireResult {
 		job := Job{
 			Command: req.Command,
