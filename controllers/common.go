@@ -13,7 +13,7 @@ type response struct {
 	DebugMessage string   `json:"debugMessage"`
 }
 
-func sendEroorResponse(w http.ResponseWriter, e error, messages ...string) {
+func SendEroorResponse(w http.ResponseWriter, e error, messages ...string) {
 	if messages[0] == "" {
 		messages = []string{"システムエラーが発生しました。"}
 	}

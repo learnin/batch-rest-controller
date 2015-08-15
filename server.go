@@ -1,6 +1,7 @@
 package main
 
 import (
+	"net/http"
 	"os"
 
 	"github.com/Sirupsen/logrus"
@@ -13,13 +14,16 @@ import (
 
 	"github.com/learnin/batch-rest-controller/controllers"
 	"github.com/learnin/batch-rest-controller/helpers"
+	"github.com/learnin/batch-rest-controller/models"
 )
 
 const LOG_DIR = "log"
 const LOG_FILE = LOG_DIR + "/server.log"
 
+var ds helpers.DataSource
+var log *multilog.MultiLogger
+
 func main() {
-	var log *multilog.MultiLogger
 	if fi, err := os.Stat(LOG_DIR); os.IsNotExist(err) {
 		if err := os.MkdirAll(LOG_DIR, 0755); err != nil {
 			panic(err)
@@ -40,7 +44,6 @@ func main() {
 	fileLogrus.Formatter = &logrus.TextFormatter{DisableColors: true}
 	log = multilog.New(stdOutLogrus, fileLogrus)
 
-	var ds helpers.DataSource
 	if err := ds.Connect(); err != nil {
 		panic(err)
 	}
@@ -48,6 +51,7 @@ func main() {
 	jobs := web.New()
 	goji.Handle("/jobs/*", jobs)
 	jobs.Use(middleware.SubRouter)
+	jobs.Use(authorization)
 	jobsController := controllers.JobsController{DS: &ds, Logger: log}
 	jobs.Post("/run", jobsController.Run)
 	jobs.Get("/:jobId", jobsController.Show)
@@ -60,4 +64,26 @@ func main() {
 	})
 
 	goji.Serve()
+}
+
+func authorization(h http.Handler) http.Handler {
+	fn := func(w http.ResponseWriter, r *http.Request) {
+		key := r.Header.Get("X-Authorization-Key")
+		if key == "" {
+			http.Error(w, "", http.StatusBadRequest)
+			return
+		}
+		apiKey := models.ApiKey{}
+		if d := ds.GetDB().Where("api_key = ?", key).First(&apiKey); d.Error != nil {
+			if d.RecordNotFound() {
+				http.Error(w, "", http.StatusForbidden)
+				return
+			}
+			log.Errorf("api_keys テーブル取得時にエラーが発生しました。error=%v", d.Error)
+			controllers.SendEroorResponse(w, d.Error, "")
+			return
+		}
+		h.ServeHTTP(w, r)
+	}
+	return http.HandlerFunc(fn)
 }

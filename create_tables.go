@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/learnin/batch-rest-controller/controllers"
 	"github.com/learnin/batch-rest-controller/helpers"
+	"github.com/learnin/batch-rest-controller/models"
 )
 
 func main() {
@@ -13,13 +13,13 @@ func main() {
 	defer ds.Close()
 	db := ds.GetDB()
 	db.LogMode(true)
-	if d := db.AutoMigrate(&controllers.Job{}); d.Error != nil {
+	if d := db.AutoMigrate(&models.Job{}); d.Error != nil {
 		panic(d.Error)
 	}
-	if d := db.AutoMigrate(&controllers.JobMessage{}); d.Error != nil {
+	if d := db.AutoMigrate(&models.JobMessage{}); d.Error != nil {
 		panic(d.Error)
 	}
-	if d := db.AutoMigrate(&controllers.ApiKey{}); d.Error != nil {
+	if d := db.AutoMigrate(&models.ApiKey{}); d.Error != nil {
 		panic(d.Error)
 	}
 

@@ -15,6 +15,7 @@ import (
 	"github.com/zenazn/goji/web"
 
 	"github.com/learnin/batch-rest-controller/helpers"
+	"github.com/learnin/batch-rest-controller/models"
 )
 
 type JobsController struct {
@@ -29,77 +30,19 @@ type Request struct {
 	Args          string
 }
 
-//go:generate stringer -type=Status
-type Status int
-
-const (
-	WaitingToRun Status = iota + 1
-	Running
-	Finished
-	CannotRun
-)
-
-type Job struct {
-	Id         int64     `sql:"AUTO_INCREMENT"`
-	Command    string    `sql:"size:1000;not null"`
-	Args       string    `sql:"size:1000"`
-	Status     Status    `sql:"size:1;not null"`
-	ExitStatus int       `sql:"size:4`
-	CreatedAt  time.Time `sql:"DEFAULT:current_timestamp;not null"`
-	FinishedAt time.Time
-}
-
-type JobMessage struct {
-	JobId     int64          `gorm:"primary_key" sql:"type:bigint"`
-	Seq       int64          `gorm:"primary_key" sql:"type:bigint"`
-	Type      JobMessageType `sql:"size:1;not null"`
-	Message   string         `sql:"size:4000"`
-	CreatedAt time.Time      `sql:"DEFAULT:current_timestamp;not null"`
-}
-
-type ApiKey struct {
-	Id         int64     `sql:"AUTO_INCREMENT"`
-	ClientName string    `sql:"size:100;not null"`
-	ApiKey     string    `sql:"size:256;not null"`
-	CreatedAt  time.Time `sql:"DEFAULT:current_timestamp;not null"`
-}
-
-//go:generate stringer -type=JobMessageType
-type JobMessageType int
-
-const (
-	Normal JobMessageType = iota + 1
-	Error
-)
-
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
-	key := r.Header.Get("X-Authorization-Key")
-	if key == "" {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-	apiKey := ApiKey{}
-	if d := controller.DS.GetDB().Where("api_key = ?", key).First(&apiKey); d.Error != nil {
-		if d.RecordNotFound() {
-			http.Error(w, "", http.StatusForbidden)
-			return
-		}
-		controller.Logger.Errorf("api_keys テーブル取得時にエラーが発生しました。error=%v", d.Error)
-		sendEroorResponse(w, d.Error, "")
-		return
-	}
 	jobId := c.URLParams["jobId"]
-	job := Job{}
+	job := models.Job{}
 	if d := controller.DS.GetDB().First(&job, jobId); d.Error != nil {
 		if d.RecordNotFound() {
 			http.Error(w, "", http.StatusNotFound)
 			return
 		}
 		controller.Logger.Errorf("jobs テーブル取得時にエラーが発生しました。error=%v", d.Error)
-		sendEroorResponse(w, d.Error, "")
+		SendEroorResponse(w, d.Error, "")
 		return
 	}
-	msgs := []JobMessage{}
+	msgs := []models.JobMessage{}
 	resMsgs := []string{}
 	if d := controller.DS.GetDB().Order("seq").Find(&msgs, "job_id = ?", jobId).Pluck("message", &resMsgs); d.Error != nil {
 		if d.RecordNotFound() {
@@ -108,7 +51,7 @@ func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.R
 			return
 		}
 		controller.Logger.Errorf("jobMessages テーブル取得時にエラーが発生しました。error=%v", d.Error)
-		sendEroorResponse(w, d.Error, "")
+		SendEroorResponse(w, d.Error, "")
 		return
 	}
 	encoder := json.NewEncoder(w)
@@ -116,22 +59,6 @@ func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.R
 }
 
 func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Request) {
-	key := r.Header.Get("X-Authorization-Key")
-	if key == "" {
-		http.Error(w, "", http.StatusBadRequest)
-		return
-	}
-	apiKey := ApiKey{}
-	if d := controller.DS.GetDB().Where("api_key = ?", key).First(&apiKey); d.Error != nil {
-		if d.RecordNotFound() {
-			http.Error(w, "", http.StatusForbidden)
-			return
-		}
-		controller.Logger.Errorf("api_keys テーブル取得時にエラーが発生しました。error=%v", d.Error)
-		sendEroorResponse(w, d.Error, "")
-		return
-	}
-
 	req := Request{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		controller.Logger.Error(err)
@@ -140,17 +67,17 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 	}
 
 	if req.Async && req.RequireResult {
-		job := Job{
+		job := models.Job{
 			Command: req.Command,
 			Args:    req.Args,
-			Status:  WaitingToRun,
+			Status:  models.WaitingToRun,
 		}
 		if req.RequireResult {
 			if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
 				return th.GetTx().Save(&job).Error
 			}); err != nil {
 				controller.Logger.Errorf("jobs テーブル登録時にエラーが発生しました。error=%v", err)
-				sendEroorResponse(w, err, "")
+				SendEroorResponse(w, err, "")
 				return
 			}
 		}
@@ -158,13 +85,13 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			controller.Logger.Errorf("標準出力パイプ取得時にエラーが発生しました。error=%v", err)
-			sendEroorResponse(w, err, "")
+			SendEroorResponse(w, err, "")
 			return
 		}
 		stderr, err := cmd.StderrPipe()
 		if err != nil {
 			controller.Logger.Errorf("標準エラー出力パイプ取得時にエラーが発生しました。error=%v", err)
-			sendEroorResponse(w, err, "")
+			SendEroorResponse(w, err, "")
 			return
 		}
 		go func(stdout *io.ReadCloser, stderr *io.ReadCloser) {
@@ -185,16 +112,16 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				}
 			}()
 			if err := cmd.Start(); err != nil && req.RequireResult {
-				jobMsg := JobMessage{
+				jobMsg := models.JobMessage{
 					JobId:   job.Id,
 					Seq:     1,
-					Type:    Error,
+					Type:    models.Error,
 					Message: err.Error(),
 				}
 				controller.insertJobMessage(&jobMsg)
 				return
 			}
-			job.Status = Running
+			job.Status = models.Running
 			if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
 				return th.GetTx().Save(&job).Error
 			}); err != nil {
@@ -211,10 +138,10 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 					case stdout := <-out:
 						if req.RequireResult {
 							nowSeq++
-							jobMsg := JobMessage{
+							jobMsg := models.JobMessage{
 								JobId:   job.Id,
 								Seq:     nowSeq,
-								Type:    Normal,
+								Type:    models.Normal,
 								Message: stdout,
 							}
 							if err := controller.insertJobMessage(&jobMsg); err != nil {
@@ -224,10 +151,10 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 					case stderr := <-errout:
 						if req.RequireResult {
 							nowSeq++
-							jobMsg := JobMessage{
+							jobMsg := models.JobMessage{
 								JobId:   job.Id,
 								Seq:     nowSeq,
-								Type:    Error,
+								Type:    models.Error,
 								Message: stderr,
 							}
 							if err := controller.insertJobMessage(&jobMsg); err != nil {
@@ -241,29 +168,29 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				jobquit <- true
 				if err2, ok := err.(*exec.ExitError); ok {
 					job.FinishedAt = time.Now()
-					job.Status = Finished
+					job.Status = models.Finished
 					if s, ok := err2.Sys().(syscall.WaitStatus); ok {
 						job.ExitStatus = s.ExitStatus()
 					}
 				} else {
 					// may be returned for I/O problems.
-					job.Status = CannotRun
+					job.Status = models.CannotRun
 				}
 				var msgCount int64
-				if cerr := controller.DS.GetDB().Model(JobMessage{}).Where("job_id = ?", job.Id).Count(&msgCount).Error; cerr != nil {
+				if cerr := controller.DS.GetDB().Model(models.JobMessage{}).Where("job_id = ?", job.Id).Count(&msgCount).Error; cerr != nil {
 					controller.Logger.Errorf("job_messages テーブル取得時にエラーが発生しました。error=%v", cerr)
 					return
 				}
-				jobMsg := JobMessage{
+				jobMsg := models.JobMessage{
 					JobId:   job.Id,
 					Seq:     msgCount + 1,
-					Type:    Error,
+					Type:    models.Error,
 					Message: err.Error(),
 				}
 				controller.insertJobMessage(&jobMsg)
 			} else {
 				job.FinishedAt = time.Now()
-				job.Status = Finished
+				job.Status = models.Finished
 				job.ExitStatus = 0
 			}
 			if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
@@ -287,16 +214,16 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 		if err := cmd.Run(); err != nil {
 			if err2, ok := err.(*exec.ExitError); ok {
 				if s, ok := err2.Sys().(syscall.WaitStatus); ok {
-					sendEroorResponse(w, err, fmt.Sprintf("バッチが正常終了しませんでした。exitStatus=%v stdout=%v stderr=%v", s.ExitStatus(), stdout.String(), stderr.String()))
+					SendEroorResponse(w, err, fmt.Sprintf("バッチが正常終了しませんでした。exitStatus=%v stdout=%v stderr=%v", s.ExitStatus(), stdout.String(), stderr.String()))
 					return
 				} else {
 					// Unix や Winodws とは異なり、 exec.ExitError.Sys() が syscall.WaitStatus ではないOSの場合
-					sendEroorResponse(w, err, fmt.Sprintf("バッチが正常終了しませんでした。stdout=%v stderr=%v", stdout.String(), stderr.String()))
+					SendEroorResponse(w, err, fmt.Sprintf("バッチが正常終了しませんでした。stdout=%v stderr=%v", stdout.String(), stderr.String()))
 					return
 				}
 			} else {
 				// may be returned for I/O problems.
-				sendEroorResponse(w, err, "バッチ実行時にエラーが発生しました。")
+				SendEroorResponse(w, err, "バッチ実行時にエラーが発生しました。")
 				return
 			}
 		}
@@ -307,7 +234,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 	encoder.Encode(response{Error: false, Messages: []string{}})
 }
 
-func (controller *JobsController) insertJobMessage(jobMsg *JobMessage) error {
+func (controller *JobsController) insertJobMessage(jobMsg *models.JobMessage) error {
 	if err := controller.DS.DoInTransaction(func(th *helpers.TxHolder) error {
 		return th.GetTx().Create(jobMsg).Error
 	}); err != nil {

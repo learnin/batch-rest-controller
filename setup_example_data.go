@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/learnin/batch-rest-controller/controllers"
 	"github.com/learnin/batch-rest-controller/helpers"
+	"github.com/learnin/batch-rest-controller/models"
 )
 
 func main() {
@@ -13,7 +13,7 @@ func main() {
 	defer ds.Close()
 	db := ds.GetDB()
 	db.LogMode(true)
-	apiKey := controllers.ApiKey{
+	apiKey := models.ApiKey{
 		ClientName: "example",
 		ApiKey:     "examplekey",
 	}
