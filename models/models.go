@@ -43,6 +43,6 @@ type JobMessage struct {
 type ApiKey struct {
 	Id         int64     `sql:"AUTO_INCREMENT"`
 	ClientName string    `sql:"size:100;not null"`
-	ApiKey     string    `sql:"size:256;not null"`
+	ApiKey     string    `sql:"size:128;not null;unique_index"`
 	CreatedAt  time.Time `sql:"DEFAULT:current_timestamp;not null"`
 }
