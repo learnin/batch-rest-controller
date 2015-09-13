@@ -42,9 +42,8 @@ func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.R
 		SendEroorResponse(w, d.Error, "")
 		return
 	}
-	msgs := []models.JobMessage{}
 	resMsgs := []string{}
-	if d := controller.DS.GetDB().Order("seq").Find(&msgs, "job_id = ?", jobId).Pluck("message", &resMsgs); d.Error != nil {
+	if d := controller.DS.GetDB().Model(&models.JobMessage{}).Where("job_id = ?", jobId).Order("seq").Pluck("message", &resMsgs); d.Error != nil {
 		if d.RecordNotFound() {
 			encoder := json.NewEncoder(w)
 			encoder.Encode(response{Error: false, Messages: []string{}})
