@@ -81,8 +81,6 @@ func action(c *cli.Context) {
 		return
 	}
 	clientName := c.Args()[0]
-	// FIXME バリデーション
-
 	newKey := hash(clientName, SALT)
 	apiKey := models.ApiKey{
 		ClientName: clientName,
