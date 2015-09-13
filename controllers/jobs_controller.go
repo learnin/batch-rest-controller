@@ -80,7 +80,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 				return
 			}
 		}
-		cmd := exec.Command("ps", "-ef")
+		cmd := exec.Command(job.Command, job.Args)
 		stdout, err := cmd.StdoutPipe()
 		if err != nil {
 			controller.Logger.Errorf("標準出力パイプ取得時にエラーが発生しました。error=%v", err)
@@ -204,7 +204,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			return
 		}
 	} else if !req.Async {
-		cmd := exec.Command("ps", "-ef")
+		cmd := exec.Command(job.Command, job.Args)
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
 		cmd.Stdout = &stdout
