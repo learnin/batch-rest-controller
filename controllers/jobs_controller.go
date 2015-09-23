@@ -98,17 +98,28 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			errout := make(chan string)
 			jobquit := make(chan bool)
 
+			stdoutfin := make(chan bool)
+			stderrfin := make(chan bool)
+
 			go func() {
 				scanner := bufio.NewScanner(*stdout)
 				for scanner.Scan() {
 					out <- scanner.Text()
 				}
+				if err := scanner.Err(); err != nil {
+					errout <- fmt.Sprintf("標準出力の読み取り時にエラーが発生しました。error=%v", err)
+				}
+				stdoutfin <- true
 			}()
 			go func() {
 				scanner := bufio.NewScanner(*stderr)
 				for scanner.Scan() {
 					errout <- scanner.Text()
 				}
+				if err := scanner.Err(); err != nil {
+					errout <- fmt.Sprintf("標準エラー出力の読み取り時にエラーが発生しました。error=%v", err)
+				}
+				stderrfin <- true
 			}()
 			if err := cmd.Start(); err != nil && req.RequireResult {
 				jobMsg := models.JobMessage{
@@ -163,6 +174,14 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 					}
 				}
 			}()
+			// https://golang.org/pkg/os/exec/#Cmd.StdoutPipe
+			// https://golang.org/pkg/os/exec/#Cmd.StderrPipe
+			// より
+			// Wait will close the pipe after seeing the command exit, so most callers need not close the pipe themselves;
+			// however, an implication is that it is incorrect to call Wait before all reads from the pipe have completed.
+			// なので、標準出力と標準エラー出力を読み切ってから Wait を呼ぶ。また、標準出力と標準エラー出力の明示的な Close は不要。
+			<-stdoutfin
+			<-stderrfin
 			if err := cmd.Wait(); err != nil {
 				jobquit <- true
 				if err2, ok := err.(*exec.ExitError); ok {
