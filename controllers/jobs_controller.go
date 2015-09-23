@@ -204,7 +204,7 @@ func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Re
 			return
 		}
 	} else if !req.Async {
-		cmd := exec.Command(job.Command, job.Args)
+		cmd := exec.Command(req.Command, req.Args)
 		var stdout bytes.Buffer
 		var stderr bytes.Buffer
 		cmd.Stdout = &stdout
