@@ -30,6 +30,11 @@ type Request struct {
 	Args          string
 }
 
+type showResponse struct {
+	response
+	Status string
+}
+
 func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.Request) {
 	jobId := c.URLParams["jobId"]
 	job := models.Job{}
@@ -54,7 +59,14 @@ func (controller *JobsController) Show(c web.C, w http.ResponseWriter, r *http.R
 		return
 	}
 	encoder := json.NewEncoder(w)
-	encoder.Encode(response{Error: false, Messages: resMsgs})
+	encoder.Encode(
+		showResponse{
+			response: response{
+				Error:    false,
+				Messages: resMsgs,
+			},
+			Status: job.Status.String(),
+		})
 }
 
 func (controller *JobsController) Run(c web.C, w http.ResponseWriter, r *http.Request) {
